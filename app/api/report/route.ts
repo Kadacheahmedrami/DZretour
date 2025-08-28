@@ -1,7 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { headers } from "next/headers"
-import { prisma } from "@/lib/prisma"
 import crypto from "crypto"
+
+// Force this API route to be dynamic (not pre-rendered)
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 interface ReportRequest {
   phone: string
@@ -87,11 +89,26 @@ function calculateRiskScore(reportCount: number, daysSinceFirst: number): {
   }
 }
 
+// Lazy load Prisma client
+async function getPrismaClient() {
+  try {
+    const { PrismaClient } = await import('@prisma/client')
+    return new PrismaClient()
+  } catch (error) {
+    console.error('Failed to load Prisma client:', error)
+    throw new Error('Database connection failed')
+  }
+}
+
 // POST endpoint for reporting phone numbers
 export async function POST(request: NextRequest) {
+  let prisma: any = null
+  
   try {
-    const headersList = headers()
-    const ip = headersList.get("x-forwarded-for") || headersList.get("x-real-ip") || "unknown"
+    // Get IP address from request headers directly
+    const forwardedFor = request.headers.get("x-forwarded-for")
+    const realIp = request.headers.get("x-real-ip")
+    const ip = forwardedFor?.split(',')[0] || realIp || "unknown"
 
     // Rate limiting for reports: 3 per hour per IP/phone combo
     const reportRateLimitResult = checkRateLimit(
@@ -112,7 +129,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const body: ReportRequest = await request.json()
+    // Add proper error handling for request body parsing
+    let body: ReportRequest;
+    try {
+      body = await request.json()
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "Invalid JSON in request body",
+          code: "INVALID_JSON",
+        },
+        { status: 400 }
+      )
+    }
 
     // Enhanced validation
     if (!body.phone || !body.reason) {
@@ -164,6 +193,9 @@ export async function POST(request: NextRequest) {
 
     // Hash the phone number for storage
     const hashedPhone = hashPhoneNumber(cleanPhone)
+
+    // Initialize Prisma client
+    prisma = await getPrismaClient()
 
     // Check for recent reports (24 hours) using hashed phone
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
@@ -233,14 +265,27 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     )
+  } finally {
+    // Clean up Prisma connection
+    if (prisma) {
+      try {
+        await prisma.$disconnect()
+      } catch (error) {
+        console.error('Error disconnecting Prisma:', error)
+      }
+    }
   }
 }
 
 // GET endpoint for checking phone numbers (separate file: check/route.ts)
 export async function GET(request: NextRequest) {
+  let prisma: any = null
+  
   try {
-    const headersList = headers()
-    const ip = headersList.get("x-forwarded-for") || headersList.get("x-real-ip") || "unknown"
+    // Get IP address from request headers directly
+    const forwardedFor = request.headers.get("x-forwarded-for")
+    const realIp = request.headers.get("x-real-ip")
+    const ip = forwardedFor?.split(',')[0] || realIp || "unknown"
 
     // Rate limiting for checks: 100 per hour per IP
     const checkRateLimitResult = checkRateLimit(
@@ -291,6 +336,9 @@ export async function GET(request: NextRequest) {
     // Hash the phone number for lookup
     const hashedPhone = hashPhoneNumber(cleanPhone)
 
+    // Initialize Prisma client
+    prisma = await getPrismaClient()
+
     const reports = await prisma.report.findMany({
       where: {
         phoneNumber: hashedPhone,
@@ -314,9 +362,9 @@ export async function GET(request: NextRequest) {
     const riskAnalysis = calculateRiskScore(reports.length, daysSinceFirst)
 
     // Group reasons but don't show exact counts
-    const reasonTypesSet = new Set(reports.map(r => r.reason))
+    const reasonTypesSet = new Set(reports.map((r: any) => r.reason))
     const reasonTypes = Array.from(reasonTypesSet)
-    const hasCustomReasons = reports.some(r => r.customReason)
+    const hasCustomReasons = reports.some((r: any) => r.customReason)
 
     // Response with privacy-focused data
     const response = {
@@ -329,7 +377,7 @@ export async function GET(request: NextRequest) {
       patterns: reports.length > 0 ? {
         reasonTypes: reasonTypes.slice(0, 3), // Limit to top 3 reason types
         hasCustomReasons,
-        reportedRecently: reports.some(r => 
+        reportedRecently: reports.some((r: any) => 
           Date.now() - r.createdAt.getTime() < 30 * 24 * 60 * 60 * 1000 // 30 days
         ),
       } : null,
@@ -347,5 +395,14 @@ export async function GET(request: NextRequest) {
       },
       { status: 500 }
     )
+  } finally {
+    // Clean up Prisma connection
+    if (prisma) {
+      try {
+        await prisma.$disconnect()
+      } catch (error) {
+        console.error('Error disconnecting Prisma:', error)
+      }
+    }
   }
 }
