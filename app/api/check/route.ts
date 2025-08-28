@@ -1,7 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { headers } from "next/headers"
-import { prisma } from "@/lib/prisma"
 import crypto from "crypto"
+
+// Dynamically import Prisma to avoid build-time issues
+const getPrisma = async () => {
+  const { prisma } = await import("@/lib/prisma")
+  return prisma
+}
 
 // Salt for phone number hashing - use environment variable in production
 const PHONE_SALT = process.env.PHONE_SALT || "default-salt-change-in-production"
@@ -74,8 +78,10 @@ function calculateRiskScore(reportCount: number, daysSinceFirst: number): {
 // POST endpoint for checking phone numbers (using POST for request body security)
 export async function POST(request: NextRequest) {
   try {
-    const headersList = headers()
-    const ip = headersList.get("x-forwarded-for") || headersList.get("x-real-ip") || "unknown"
+    // Get IP address from request headers directly
+    const forwardedFor = request.headers.get("x-forwarded-for")
+    const realIp = request.headers.get("x-real-ip")
+    const ip = forwardedFor?.split(',')[0] || realIp || "unknown"
 
     // Rate limiting for checks: 100 per hour per IP
     const rateLimit = checkRateLimit(
@@ -137,6 +143,9 @@ export async function POST(request: NextRequest) {
 
     // Hash the phone number for lookup
     const hashedPhone = hashPhoneNumber(cleanPhone)
+
+    // Get Prisma client dynamically
+    const prisma = await getPrisma()
 
     const reports = await prisma.report.findMany({
       where: {
