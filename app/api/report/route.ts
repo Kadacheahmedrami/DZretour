@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server"
-import crypto from "crypto"
 
 // Force this API route to be dynamic (not pre-rendered)
 export const dynamic = 'force-dynamic'
@@ -15,22 +14,12 @@ interface CheckRequest {
   phone: string
 }
 
-// Salt for phone number hashing - use environment variable in production
-const PHONE_SALT = process.env.PHONE_SALT || "default-salt-change-in-production"
-
 // Rate limiting maps (use Redis in production)
 const reportRateLimitMap = new Map<string, { count: number; resetTime: number }>()
 const checkRateLimitMap = new Map<string, { count: number; resetTime: number }>()
 
-function hashPhoneNumber(phone: string): string {
-  return crypto
-    .createHash("sha256")
-    .update(phone + PHONE_SALT)
-    .digest("hex")
-}
-
 function getRateLimitKey(ip: string, phone?: string): string {
-  return phone ? `${ip}:${hashPhoneNumber(phone)}` : ip
+  return phone ? `${ip}:${phone}` : ip
 }
 
 function checkRateLimit(
@@ -89,6 +78,78 @@ function calculateRiskScore(reportCount: number, daysSinceFirst: number): {
   }
 }
 
+// Helper function to get location data from IP
+async function getLocationFromIP(ip: string): Promise<{
+  country?: string
+  city?: string
+  timezone?: string
+}> {
+  try {
+    // Skip lookup for local/unknown IPs
+    if (ip === "unknown" || ip.startsWith("127.") || ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.")) {
+      console.log(`Skipping location lookup for local IP: ${ip}`)
+      return {}
+    }
+
+    console.log(`Looking up location for IP: ${ip}`)
+
+    // Try with ipapi.co first (more reliable)
+    const response = await fetch(`https://ipapi.co/${ip}/json/`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; ReportBot/1.0)'
+      },
+      timeout: 5000
+    })
+
+    if (!response.ok) {
+      console.log(`ipapi.co failed with status: ${response.status}`)
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    const data = await response.json()
+    console.log(`Location data received:`, data)
+
+    // Check if we got valid data
+    if (data.error) {
+      console.log(`ipapi.co error: ${data.reason}`)
+      return {}
+    }
+
+    return {
+      country: data.country_code || null,
+      city: data.city || null,
+      timezone: data.timezone || null
+    }
+
+  } catch (error) {
+    console.log(`Primary location lookup failed for IP ${ip}:`, error)
+    
+    // Fallback to ip-api.com
+    try {
+      console.log(`Trying fallback location service for IP: ${ip}`)
+      const fallbackResponse = await fetch(`http://ip-api.com/json/${ip}?fields=status,countryCode,city,timezone`, {
+        timeout: 5000
+      })
+      
+      const fallbackData = await fallbackResponse.json()
+      console.log(`Fallback location data:`, fallbackData)
+      
+      if (fallbackData.status === 'success') {
+        return {
+          country: fallbackData.countryCode || null,
+          city: fallbackData.city || null,
+          timezone: fallbackData.timezone || null
+        }
+      }
+    } catch (fallbackError) {
+      console.log(`Fallback location lookup also failed:`, fallbackError)
+    }
+  }
+  
+  console.log(`No location data available for IP: ${ip}`)
+  return {}
+}
+
 // Lazy load Prisma client
 async function getPrismaClient() {
   try {
@@ -109,6 +170,9 @@ export async function POST(request: NextRequest) {
     const forwardedFor = request.headers.get("x-forwarded-for")
     const realIp = request.headers.get("x-real-ip")
     const ip = forwardedFor?.split(',')[0] || realIp || "unknown"
+
+    // Get User-Agent
+    const userAgent = request.headers.get("user-agent") || null
 
     // Rate limiting for reports: 3 per hour per IP/phone combo
     const reportRateLimitResult = checkRateLimit(
@@ -191,17 +255,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Hash the phone number for storage
-    const hashedPhone = hashPhoneNumber(cleanPhone)
-
     // Initialize Prisma client
     prisma = await getPrismaClient()
 
-    // Check for recent reports (24 hours) using hashed phone
+    // Check for recent reports (24 hours) using plain phone number
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
     const recentReport = await prisma.report.findFirst({
       where: {
-        phoneNumber: hashedPhone,
+        phoneNumber: cleanPhone,
         createdAt: {
           gte: twentyFourHoursAgo,
         },
@@ -222,12 +283,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create new report with hashed phone number
+    // Get location data from IP (async operation)
+    const locationData = await getLocationFromIP(ip)
+
+    // Create new report with plain phone number and reporter data
     const newReport = await prisma.report.create({
       data: {
-        phoneNumber: hashedPhone,
+        phoneNumber: cleanPhone,
         reason: body.reason,
         customReason: body.customReason,
+        // Auto-collected reporter data
+        reporterIp: ip !== "unknown" ? ip : null,
+        reporterUserAgent: userAgent,
+        reporterCountry: locationData.country || null,
+        reporterCity: locationData.city || null,
+        reporterTimezone: locationData.timezone || null,
       },
     })
 
@@ -277,7 +347,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET endpoint for checking phone numbers (separate file: check/route.ts)
+// GET endpoint for checking phone numbers
 export async function GET(request: NextRequest) {
   let prisma: any = null
   
@@ -333,15 +403,12 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Hash the phone number for lookup
-    const hashedPhone = hashPhoneNumber(cleanPhone)
-
     // Initialize Prisma client
     prisma = await getPrismaClient()
 
     const reports = await prisma.report.findMany({
       where: {
-        phoneNumber: hashedPhone,
+        phoneNumber: cleanPhone,
       },
       orderBy: {
         createdAt: "asc",
@@ -350,10 +417,13 @@ export async function GET(request: NextRequest) {
         reason: true,
         customReason: true,
         createdAt: true,
+        // Include reporter data for analytics (optional - you might want to exclude this for privacy)
+        reporterCountry: true,
+        reporterCity: true,
       },
     })
 
-    // Calculate risk score instead of showing exact counts
+    // Calculate risk score
     const firstReport = reports[0]
     const daysSinceFirst = firstReport 
       ? Math.floor((Date.now() - firstReport.createdAt.getTime()) / (1000 * 60 * 60 * 24))
@@ -361,26 +431,49 @@ export async function GET(request: NextRequest) {
 
     const riskAnalysis = calculateRiskScore(reports.length, daysSinceFirst)
 
-    // Group reasons but don't show exact counts
+    // Group reasons
     const reasonTypesSet = new Set(reports.map((r: any) => r.reason))
     const reasonTypes = Array.from(reasonTypesSet)
     const hasCustomReasons = reports.some((r: any) => r.customReason)
 
-    // Response with privacy-focused data
+    // Get geographic diversity (new insight from reporter data)
+    const countries = new Set(reports.map((r: any) => r.reporterCountry).filter(Boolean))
+    const cities = new Set(reports.map((r: any) => r.reporterCity).filter(Boolean))
+
+    // Response with detailed report data
     const response = {
       isReported: reports.length > 0,
+      reportCount: reports.length,
       risk: {
         level: riskAnalysis.level,
+        score: riskAnalysis.score,
         message: riskAnalysis.message,
       },
-      // Only show general patterns, not exact data
+      // Show detailed patterns and reports
       patterns: reports.length > 0 ? {
-        reasonTypes: reasonTypes.slice(0, 3), // Limit to top 3 reason types
+        reasonTypes,
         hasCustomReasons,
         reportedRecently: reports.some((r: any) => 
           Date.now() - r.createdAt.getTime() < 30 * 24 * 60 * 60 * 1000 // 30 days
         ),
+        firstReportDate: firstReport ? firstReport.createdAt : null,
+        daysSinceFirstReport: daysSinceFirst,
+        // New geographic insights
+        geographicDiversity: {
+          countriesCount: countries.size,
+          citiesCount: cities.size,
+          countries: Array.from(countries),
+        }
       } : null,
+      // Return all reports for transparency (excluding sensitive reporter data)
+      reports: reports.map((report: any) => ({
+        reason: report.reason,
+        customReason: report.customReason,
+        createdAt: report.createdAt,
+        // Optional: include geographic context (consider privacy implications)
+        country: report.reporterCountry,
+        city: report.reporterCity,
+      })),
       checkedAt: new Date().toISOString(),
       remaining: checkRateLimitResult.remaining,
     }

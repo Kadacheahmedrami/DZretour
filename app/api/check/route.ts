@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server"
-import crypto from "crypto"
 
 // Dynamically import Prisma to avoid build-time issues
 const getPrisma = async () => {
@@ -7,18 +6,8 @@ const getPrisma = async () => {
   return prisma
 }
 
-// Salt for phone number hashing - use environment variable in production
-const PHONE_SALT = process.env.PHONE_SALT || "default-salt-change-in-production"
-
 // Rate limiting map (use Redis in production)
 const checkRateLimitMap = new Map<string, { count: number; resetTime: number }>()
-
-function hashPhoneNumber(phone: string): string {
-  return crypto
-    .createHash("sha256")
-    .update(phone + PHONE_SALT)
-    .digest("hex")
-}
 
 function checkRateLimit(
   key: string,
@@ -41,38 +30,98 @@ function checkRateLimit(
   return { allowed: true, remaining: maxRequests - current.count }
 }
 
-function calculateRiskScore(reportCount: number, daysSinceFirst: number): {
+function calculateRiskScore(reports: Array<{ createdAt: Date }>, daysSinceFirst: number): {
   level: "safe" | "low" | "medium" | "high"
   score: number
   message: string
 } {
-  if (reportCount === 0) {
+  if (reports.length === 0) {
     return { level: "safe", score: 0, message: "No reports found" }
   }
 
-  // Calculate base score from report count
-  let score = Math.min(reportCount * 15, 70) // Max 70 points from count
+  let totalScore = 0
+  const now = Date.now()
 
-  // Add recency factor (more recent = higher risk)
-  if (daysSinceFirst < 30) {
-    score += 20
-  } else if (daysSinceFirst < 90) {
-    score += 10
+  // Calculate time-weighted score for each report
+  reports.forEach(report => {
+    const daysOld = Math.floor((now - report.createdAt.getTime()) / (1000 * 60 * 60 * 24))
+    
+    // Base score per report: 15 points, but decreases with age
+    let reportScore = 15
+    
+    // Time decay factor - older reports have less impact
+    if (daysOld <= 7) {
+      // Very recent (1 week): full weight
+      reportScore = 15
+    } else if (daysOld <= 30) {
+      // Recent (1 month): 80% weight
+      reportScore = 12
+    } else if (daysOld <= 90) {
+      // Moderate age (3 months): 60% weight
+      reportScore = 9
+    } else if (daysOld <= 180) {
+      // Old (6 months): 40% weight
+      reportScore = 6
+    } else if (daysOld <= 365) {
+      // Very old (1 year): 20% weight
+      reportScore = 3
+    } else {
+      // Ancient (1+ year): 10% weight
+      reportScore = 1.5
+    }
+    
+    totalScore += reportScore
+  })
+
+  // Additional factors for overall pattern
+  
+  // Recent activity bonus (reports in last 30 days get extra weight)
+  const recentReports = reports.filter(r => 
+    (now - r.createdAt.getTime()) < 30 * 24 * 60 * 60 * 1000
+  )
+  if (recentReports.length > 0) {
+    totalScore += Math.min(recentReports.length * 5, 20) // Max 20 bonus points
+  }
+  
+  // Frequency factor (but less aggressive than before)
+  const reportsPerDay = reports.length / Math.max(daysSinceFirst, 1)
+  if (reportsPerDay > 0.5) {
+    totalScore += 10 // Reduced from 15
+  } else if (reportsPerDay > 0.1) {
+    totalScore += 3 // Reduced from 5
   }
 
-  // Add frequency factor
-  const reportsPerDay = reportCount / Math.max(daysSinceFirst, 1)
-  if (reportsPerDay > 0.5) score += 15
-  else if (reportsPerDay > 0.1) score += 5
-
-  // Determine risk level
-  if (score < 20) {
-    return { level: "low", score, message: "Low risk detected" }
-  } else if (score < 50) {
-    return { level: "medium", score, message: "Moderate risk - exercise caution" }
+  // Determine risk level with adjusted thresholds
+  if (totalScore < 15) {
+    return { level: "low", score: Math.round(totalScore * 10) / 10, message: "Low risk detected" }
+  } else if (totalScore < 35) {
+    return { level: "medium", score: Math.round(totalScore * 10) / 10, message: "Moderate risk - exercise caution" }
   } else {
-    return { level: "high", score, message: "High risk - proceed with extreme caution" }
+    return { level: "high", score: Math.round(totalScore * 10) / 10, message: "High risk - proceed with extreme caution" }
   }
+}
+
+function normalizePhoneNumber(phone: string): string {
+  // Remove all spaces, dashes, parentheses, but keep + and digits
+  let cleaned = phone.replace(/[\s\-\(\)]/g, "")
+  
+  // Convert all formats to local format (0XXXXXXXXX) to match database storage
+  if (cleaned.startsWith("+213")) {
+    // Convert +213xxxxxxxx to 0xxxxxxxx
+    cleaned = "0" + cleaned.substring(4)
+  } else if (cleaned.startsWith("00213")) {
+    // Convert 00213xxxxxxxx to 0xxxxxxxx
+    cleaned = "0" + cleaned.substring(5)
+  } else if (cleaned.startsWith("213")) {
+    // Convert 213xxxxxxxx to 0xxxxxxxx
+    cleaned = "0" + cleaned.substring(3)
+  } else if (cleaned.match(/^[567]\d{8}$/)) {
+    // If it starts with 5, 6, or 7 and has 9 digits total, add 0
+    cleaned = "0" + cleaned
+  }
+  // If it already starts with 0, keep it as is
+  
+  return cleaned
 }
 
 // POST endpoint for checking phone numbers (using POST for request body security)
@@ -127,29 +176,33 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Clean and validate phone number
-    const cleanPhone = phone.replace(/\s/g, "")
-    const phoneRegex = /^(\+213|0)[5-7]\d{8}$/
+    // Normalize and validate phone number
+    const normalizedPhone = normalizePhoneNumber(phone)
+    // Updated regex to match local Algerian format stored in DB: 0 followed by 5,6,or 7 then 8 digits
+    const phoneRegex = /^0[567]\d{8}$/
 
-    if (!phoneRegex.test(cleanPhone)) {
+    if (!phoneRegex.test(normalizedPhone)) {
       return NextResponse.json(
         {
-          error: "Invalid phone number format",
+          error: "Invalid Algerian mobile phone number format. Expected format: 0XXXXXXXXX",
           code: "INVALID_PHONE",
+          debug: process.env.NODE_ENV === "development" ? { 
+            input: phone, 
+            normalized: normalizedPhone,
+            expected: "0XXXXXXXXX (where second digit is 5, 6, or 7)"
+          } : undefined
         },
         { status: 400 }
       )
     }
 
-    // Hash the phone number for lookup
-    const hashedPhone = hashPhoneNumber(cleanPhone)
-
     // Get Prisma client dynamically
     const prisma = await getPrisma()
 
+    // Query reports using the normalized phone number
     const reports = await prisma.report.findMany({
       where: {
-        phoneNumber: hashedPhone,
+        phoneNumber: normalizedPhone,
       },
       orderBy: {
         createdAt: "asc",
@@ -161,13 +214,13 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Calculate risk score instead of showing exact counts
+    // Calculate risk score with time decay
     const firstReport = reports[0]
     const daysSinceFirst = firstReport 
       ? Math.floor((Date.now() - firstReport.createdAt.getTime()) / (1000 * 60 * 60 * 24))
       : 0
 
-    const riskAnalysis = calculateRiskScore(reports.length, daysSinceFirst)
+    const riskAnalysis = calculateRiskScore(reports, daysSinceFirst)
 
     // Group reasons but don't show exact counts
     const reasonTypes = Array.from(new Set(reports.map(r => r.reason)))
@@ -198,12 +251,15 @@ export async function POST(request: NextRequest) {
       metadata: {
         checkedAt: new Date().toISOString(),
         remaining: rateLimit.remaining,
-        // Don't expose the hashed phone or exact counts
       }
     }
 
-    // Log the check for monitoring (without exposing the actual phone number)
-    console.log(`Phone check performed from IP: ${ip}, Risk: ${riskAnalysis.level}`)
+    // Log the check for monitoring (with debug info in development)
+    console.log(`Phone check performed from IP: ${ip}, Risk: ${riskAnalysis.level}, Reports found: ${reports.length}`)
+    
+    if (process.env.NODE_ENV === "development") {
+      console.log(`Debug - Input: ${phone}, Normalized: ${normalizedPhone}, Query result: ${reports.length} reports`)
+    }
 
     return NextResponse.json(response)
   } catch (error) {

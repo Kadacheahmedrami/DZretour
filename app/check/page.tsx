@@ -38,63 +38,38 @@ function PhoneInput({ value, onChange, onValidation }: PhoneInputProps) {
     checkClipboard()
   }, [value])
 
-  // Convert +213 format to Algerian local format (0xxxxxxxxx)
+  // Convert +213 format to Algerian local format (0xxxxxxxxx) - matches API normalization
   const formatAlgerianNumber = (phone: string) => {
-    // Remove all non-digit characters except +
-    let cleaned = phone.replace(/[^\d+]/g, "")
+    // Remove all spaces, dashes, parentheses, but keep + and digits
+    let cleaned = phone.replace(/[\s\-\(\)]/g, "")
     
-    // Handle +213 format
+    // Convert all formats to local format (0XXXXXXXXX) to match API normalization
     if (cleaned.startsWith("+213")) {
-      // Remove +213 and add 0 at the beginning
-      const localPart = cleaned.substring(4)
-      if (localPart.length <= 9) {
-        return "0" + localPart
-      }
-      // If more than 9 digits after +213, truncate to 9
-      return "0" + localPart.substring(0, 9)
+      // Convert +213xxxxxxxx to 0xxxxxxxx
+      cleaned = "0" + cleaned.substring(4)
+    } else if (cleaned.startsWith("00213")) {
+      // Convert 00213xxxxxxxx to 0xxxxxxxx
+      cleaned = "0" + cleaned.substring(5)
+    } else if (cleaned.startsWith("213")) {
+      // Convert 213xxxxxxxx to 0xxxxxxxx
+      cleaned = "0" + cleaned.substring(3)
+    } else if (cleaned.match(/^[567]\d{8}$/)) {
+      // If it starts with 5, 6, or 7 and has 9 digits total, add 0
+      cleaned = "0" + cleaned
     }
-    
-    // Handle 213 format (without +)
-    if (cleaned.startsWith("213") && cleaned.length > 3) {
-      const localPart = cleaned.substring(3)
-      if (localPart.length <= 9) {
-        return "0" + localPart
-      }
-      // If more than 9 digits after 213, truncate to 9
-      return "0" + localPart.substring(0, 9)
-    }
-    
-    // If it already starts with 0, keep as is but limit length
+    // If it already starts with 0, keep it as is but limit length
     if (cleaned.startsWith("0")) {
-      return cleaned.substring(0, MAX_ALGERIAN_DIGITS)
+      cleaned = cleaned.substring(0, MAX_ALGERIAN_DIGITS)
     }
     
-    // If it's a 9-digit number (missing the leading 0), add it
-    if (cleaned.length === 9 && /^[567]/.test(cleaned)) {
-      return "0" + cleaned
-    }
-    
-    // For other cases, just return cleaned number with length limit
-    return cleaned.substring(0, MAX_ALGERIAN_DIGITS)
+    return cleaned
   }
 
-  // Validate Algerian phone number
+  // Validate Algerian phone number - matches API regex: /^0[567]\d{8}$/
   const isValidPhone = (phone: string) => {
     const cleaned = phone.replace(/\s/g, "")
-    
-    // Algerian phone numbers should:
-    // - Start with 0
-    // - Be exactly 10 digits
-    // - Second digit should be 5, 6, or 7 (mobile) or other digits for landlines
-    return (
-      cleaned.length === MAX_ALGERIAN_DIGITS &&
-      cleaned.startsWith("0") &&
-      /^0[567][0-9]{8}$/.test(cleaned) // Mobile numbers
-    ) || (
-      cleaned.length === MAX_ALGERIAN_DIGITS &&
-      cleaned.startsWith("0") &&
-      /^0[2-4][0-9]{8}$/.test(cleaned) // Landline numbers
-    )
+    // Match API validation exactly: starts with 0, followed by 5/6/7, then 8 digits
+    return /^0[567]\d{8}$/.test(cleaned)
   }
 
   useEffect(() => {
@@ -145,7 +120,6 @@ function PhoneInput({ value, onChange, onValidation }: PhoneInputProps) {
     // Allow numbers from main keyboard (0-9) and numpad (0-9)
     const isNumber = (e.keyCode >= 48 && e.keyCode <= 57) || (e.keyCode >= 96 && e.keyCode <= 105)
     
- 
     // Allow only numbers
     if (!isNumber) {
       e.preventDefault()
@@ -225,8 +199,8 @@ function PhoneInput({ value, onChange, onValidation }: PhoneInputProps) {
             <span className="text-red-500 flex items-center gap-2">
               <AlertTriangle className="w-4 h-4" />
               {language === "ar" ? 
-                "رقم جزائري غير صحيح (يجب أن يبدأ بـ 0 ويحتوي على 10 أرقام)" : 
-                "Numéro algérien invalide (doit commencer par 0 et contenir 10 chiffres)"
+                "رقم جزائري غير صحيح (يجب أن يبدأ بـ 05 أو 06 أو 07)" : 
+                "Numéro algérien invalide (doit commencer par 05, 06 ou 07)"
               }
             </span>
           ) : null}
@@ -246,6 +220,7 @@ function PhoneInput({ value, onChange, onValidation }: PhoneInputProps) {
   )
 }
 
+// Updated interface to match API response exactly
 interface CheckResult {
   isReported: boolean
   risk: {
@@ -264,6 +239,17 @@ interface CheckResult {
   metadata: {
     checkedAt: string
     remaining: number
+  }
+}
+
+interface ApiErrorResponse {
+  error: string
+  code: string
+  resetTime?: number
+  debug?: {
+    input: string
+    normalized: string
+    expected: string
   }
 }
 
@@ -290,31 +276,42 @@ export default function CheckPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          phone: phoneNumber.replace(/\s/g, ""),
+          phone: phoneNumber.replace(/\s/g, ""), // Send exactly what API expects
         }),
       })
 
-      const data = await response.json()
+      const data: CheckResult | ApiErrorResponse = await response.json()
 
       if (response.ok) {
-        setResult(data)
+        setResult(data as CheckResult)
       } else {
-        switch (data.code) {
+        const errorData = data as ApiErrorResponse
+        switch (errorData.code) {
           case "INVALID_PHONE":
-            setError(language === "ar" ? "تنسيق رقم الهاتف غير صحيح" : "Format de numéro invalide")
+            setError(language === "ar" ? 
+              "تنسيق رقم الهاتف غير صحيح. يجب أن يبدأ بـ 05 أو 06 أو 07" : 
+              "Format de numéro invalide. Doit commencer par 05, 06 ou 07"
+            )
             break
           case "MISSING_PHONE":
             setError(language === "ar" ? "رقم الهاتف مطلوب" : "Numéro de téléphone requis")
             break
           case "RATE_LIMITED_CHECK":
+            const resetTime = errorData.resetTime ? new Date(errorData.resetTime).toLocaleTimeString() : ""
             setError(
               language === "ar" 
-                ? "تم تجاوز الحد المسموح. حاول مرة أخرى لاحقاً" 
-                : "Limite de vérifications atteinte. Réessayez plus tard"
+                ? `تم تجاوز الحد المسموح (100 فحص/ساعة). حاول مرة أخرى ${resetTime ? `في ${resetTime}` : 'لاحقاً'}` 
+                : `Limite de vérifications atteinte (100/heure). Réessayez ${resetTime ? `à ${resetTime}` : 'plus tard'}`
             )
             break
+          case "INVALID_JSON":
+            setError(language === "ar" ? "خطأ في تنسيق البيانات" : "Erreur de format des données")
+            break
+          case "INTERNAL_ERROR":
+            setError(language === "ar" ? "خطأ في الخادم. حاول مرة أخرى" : "Erreur serveur. Réessayez")
+            break
           default:
-            setError(data.error || (language === "ar" ? "حدث خطأ" : "Une erreur s'est produite"))
+            setError(errorData.error || (language === "ar" ? "حدث خطأ غير متوقع" : "Une erreur inattendue s'est produite"))
         }
       }
     } catch (err) {
@@ -436,6 +433,32 @@ export default function CheckPage() {
     return timespan
   }
 
+  // Helper function to translate reason types
+  const translateReasonType = (reason: string) => {
+    const translations = {
+      ar: {
+        "Spam": "رسائل مزعجة",
+        "Scam": "احتيال",
+        "Harassment": "مضايقة",
+        "Fraud": "نصب",
+        "Robocall": "مكالمات آلية",
+        "Telemarketing": "تسويق هاتفي",
+        "Other": "أخرى"
+      },
+      fr: {
+        "Spam": "Spam",
+        "Scam": "Arnaque",
+        "Harassment": "Harcèlement", 
+        "Fraud": "Fraude",
+        "Robocall": "Appel automatique",
+        "Telemarketing": "Télémarketing",
+        "Other": "Autre"
+      }
+    }
+    
+    return translations[language as keyof typeof translations]?.[reason as keyof typeof translations.ar] || reason
+  }
+
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "WebPage",
@@ -496,8 +519,6 @@ export default function CheckPage() {
                 </button>
               </div>
 
-           
-
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                   <div className="flex items-center gap-3">
@@ -520,6 +541,20 @@ export default function CheckPage() {
                       <p className={`text-sm leading-relaxed text-center font-medium ${language === "ar" ? "text-right" : "text-left"}`}>
                         {result.risk.message}
                       </p>
+                    </div>
+
+                    {/* Show report status */}
+                    <div className="mb-4">
+                      <div className={`text-sm font-medium text-center p-3 rounded-lg ${
+                        result.isReported 
+                          ? "bg-orange-100 text-orange-800" 
+                          : "bg-green-100 text-green-800"
+                      }`}>
+                        {result.isReported 
+                          ? (language === "ar" ? "تم الإبلاغ عن هذا الرقم" : "Ce numéro a été signalé")
+                          : (language === "ar" ? "لم يتم الإبلاغ عن هذا الرقم" : "Aucun signalement pour ce numéro")
+                        }
+                      </div>
                     </div>
 
                     {result.patterns && (
@@ -574,7 +609,7 @@ export default function CheckPage() {
                                       key={index}
                                       className="inline-block px-2 py-1 bg-white/60 rounded text-xs"
                                     >
-                                      {reason}
+                                      {translateReasonType(reason)}
                                     </span>
                                   ))}
                                 </div>
@@ -604,7 +639,13 @@ export default function CheckPage() {
                       </div>
                     )}
 
-     
+                    {/* Rate limit info */}
+                    <div className="mt-4 text-xs text-slate-500 text-center">
+                      {language === "ar" ? 
+                        `${result.metadata.remaining} فحص متبقي هذه الساعة` :
+                        `${result.metadata.remaining} vérifications restantes cette heure`
+                      }
+                    </div>
                   </div>
                 </div>
               )}
@@ -632,7 +673,7 @@ export default function CheckPage() {
                     <li className="flex items-start gap-2">
                       <span className="text-green-600">✓</span>
                       <span>
-                        {language === "ar" ? "حد أقصى للاستعلامات لمنع الإساءة" : "Limite de requêtes pour éviter les abus"}
+                        {language === "ar" ? "حد أقصى 100 استعلام في الساعة لمنع الإساءة" : "Limite de 100 requêtes par heure pour éviter les abus"}
                       </span>
                     </li>
                     <li className="flex items-start gap-2">

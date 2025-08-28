@@ -12,18 +12,30 @@ datasource db {
 
 model Report {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  phoneNumber String   @map("phone_number") @db.VarChar(64) // Increased for SHA-256 hash
+  phoneNumber String   @map("phone_number") @db.VarChar(20) // Reduced size for plain phone numbers
   reason      String   @db.VarChar(100)
   customReason String? @map("custom_reason") @db.VarChar(500)
+  
+  // Auto-collected reporter data (from HTTP request)
+  reporterIp       String?  @map("reporter_ip") @db.VarChar(45) // IPv6 can be up to 45 chars
+  reporterUserAgent String? @map("reporter_user_agent") @db.VarChar(500)
+  reporterCountry  String?  @map("reporter_country") @db.VarChar(2) // ISO country code from IP
+  reporterCity     String?  @map("reporter_city") @db.VarChar(100) // City from IP geolocation
+  reporterTimezone String?  @map("reporter_timezone") @db.VarChar(50) // Timezone from IP
+  
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  // Optimized indexes for performance with hashed phone numbers
-  @@index([phoneNumber], map: "idx_reports_phone_hash")
+  // Optimized indexes for performance with plain phone numbers
+  @@index([phoneNumber], map: "idx_reports_phone")
   @@index([createdAt], map: "idx_reports_created_at")
   @@index([phoneNumber, createdAt], map: "idx_reports_phone_created")
   @@index([reason], map: "idx_reports_reason")
   @@index([customReason], map: "idx_reports_custom_reason")
+  
+  // Indexes for auto-collected reporter data
+  @@index([reporterIp], map: "idx_reports_reporter_ip")
+  @@index([reporterCountry], map: "idx_reports_reporter_country")
   
   @@map("reports")
 }
