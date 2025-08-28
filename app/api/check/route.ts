@@ -146,8 +146,8 @@ export async function POST(request: NextRequest) {
 
     const riskAnalysis = calculateRiskScore(reports.length, daysSinceFirst)
 
-    // Group reasons but don't show exact counts
-    const reasonTypes = [...new Set(reports.map(r => r.reason))]
+    // Group reasons but don't show exact counts - FIXED LINE
+    const reasonTypes = Array.from(new Set(reports.map(r => r.reason)))
     const hasCustomReasons = reports.some(r => r.customReason)
 
     // Response with privacy-focused data
