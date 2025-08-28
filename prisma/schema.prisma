@@ -1,0 +1,37 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Report {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phoneNumber String   @map("phone_number") @db.VarChar(64) // Increased for SHA-256 hash
+  reason      String   @db.VarChar(100)
+  customReason String? @map("custom_reason") @db.VarChar(500)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Optimized indexes for performance with hashed phone numbers
+  @@index([phoneNumber], map: "idx_reports_phone_hash")
+  @@index([createdAt], map: "idx_reports_created_at")
+  @@index([phoneNumber, createdAt], map: "idx_reports_phone_created")
+  @@index([reason], map: "idx_reports_reason")
+  @@index([customReason], map: "idx_reports_custom_reason")
+  
+  @@map("reports")
+}
+
+model ReportStats {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  totalReports Int      @default(0) @map("total_reports")
+  lastUpdated  DateTime @default(now()) @map("last_updated") @db.Timestamptz
+
+  @@map("report_stats")
+}

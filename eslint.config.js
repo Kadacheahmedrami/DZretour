@@ -1,0 +1,7 @@
+module.exports = {
+  extends: ["next/core-web-vitals", "prettier"],
+  rules: {
+    "prefer-const": "error",
+    "no-unused-vars": "warn",
+  },
+}

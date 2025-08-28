@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-inter: "Inter", system-ui, sans-serif;
+  --font-noto-arabic: "Noto Sans Arabic", system-ui, sans-serif;
+
+  /* Updated color palette following design brief with red primary and yellow accent */
+  --background: 0 0% 100%; /* #ffffff - Clean white background */
+  --foreground: 220 13% 26%; /* #374151 - Dark gray for primary text */
+  --card: 0 86% 97%; /* #fef2f2 - Light pink for cards */
+  --card-foreground: 220 13% 26%; /* #374151 - Dark gray for card text */
+  --popover: 0 0% 100%; /* #ffffff - White for popover background */
+  --popover-foreground: 220 13% 26%; /* #374151 - Dark gray for popover text */
+  --primary: 0 84% 60%; /* #dc2626 - Red for primary actions */
+  --primary-foreground: 0 0% 100%; /* #ffffff - White for text on primary actions */
+  --secondary: 43 96% 56%; /* #f59e0b - Yellow for secondary actions */
+  --secondary-foreground: 220 13% 26%; /* #374151 - Dark gray for text on secondary actions */
+  --muted: 0 86% 97%; /* #fef2f2 - Light pink for muted elements */
+  --muted-foreground: 220 13% 26%; /* #374151 - Dark gray for muted text */
+  --accent: 43 96% 56%; /* #f59e0b - Yellow for accents */
+  --accent-foreground: 220 13% 26%; /* #374151 - Dark gray for accent text */
+  --destructive: 0 84% 60%; /* #dc2626 - Red for destructive actions */
+  --destructive-foreground: 0 0% 100%; /* #ffffff - White for text on destructive actions */
+  --border: 220 13% 91%; /* #e5e7eb - Light gray for borders */
+  --input: 0 0% 100%; /* #ffffff - White for input backgrounds */
+  --ring: 0 84% 60%; /* #dc2626 - Red for focus rings */
+  --radius: 0.75rem; /* Increased border radius for more modern look */
+}
+
+/* Added dark mode support for better compatibility */
+.dark {
+  --background: 0 0% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 0 0% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 9%;
+  --secondary: 0 0% 14.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 14.9%;
+  --muted-foreground: 0 0% 63.9%;
+  --accent: 0 0% 14.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 14.9%;
+  --input: 0 0% 14.9%;
+  --ring: 0 0% 83.1%;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@layer base {
+  html {
+    font-family: var(--font-inter), system-ui, sans-serif;
+  }
+
+  html[dir="rtl"] {
+    font-family: var(--font-noto-arabic), system-ui, sans-serif;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  *:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer components {
+  /* Fixed button styles with proper spacing and mobile-first approach */
+  .btn-primary {
+    @apply bg-primary hover:bg-primary/90 active:bg-primary/95 text-primary-foreground font-semibold py-4 px-6 md:px-8 rounded-xl transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5;
+    min-height: 48px;
+    font-size: 1rem;
+  }
+
+  .btn-secondary {
+    @apply bg-secondary hover:bg-secondary/90 active:bg-secondary/95 text-secondary-foreground font-semibold py-4 px-6 md:px-8 rounded-xl transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5;
+    min-height: 48px;
+    font-size: 1rem;
+  }
+
+  /* Added missing subtitle class for consistent subtitle styling */
+  .subtitle {
+    @apply text-base md:text-lg lg:text-xl text-muted-foreground leading-relaxed font-medium max-w-3xl mx-auto mb-6 md:mb-8;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-4 md:px-6 border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-all duration-200 bg-input text-foreground placeholder:text-muted-foreground shadow-sm hover:shadow-md focus:shadow-lg;
+    min-height: 48px;
+    font-size: 1rem;
+  }
+
+  .card {
+    @apply bg-card text-card-foreground rounded-2xl shadow-sm hover:shadow-lg border border-border p-4 md:p-6 lg:p-8 transition-all duration-300 backdrop-blur-sm hover:scale-[1.02];
+  }
+
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-md border border-border/50 rounded-2xl shadow-xl p-4 md:p-6 lg:p-8 transition-all duration-300 hover:shadow-2xl hover:bg-card/90 hover:border-border/80;
+  }
+
+  .phone-input {
+    @apply input-field text-lg font-mono tracking-wider;
+  }
+
+  .phone-input:focus {
+    @apply ring-2 ring-primary/50 border-primary/50 shadow-lg;
+  }
+
+  .loading-spinner {
+    @apply animate-spin rounded-full h-6 w-6 border-2 border-primary/20 border-t-primary;
+  }
+
+  .status-safe {
+    @apply bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-2 md:px-4 rounded-full text-sm font-medium;
+  }
+
+  .status-warning {
+    @apply bg-amber-50 text-amber-700 border border-amber-200 px-3 py-2 md:px-4 rounded-full text-sm font-medium;
+  }
+
+  .status-danger {
+    @apply bg-red-50 text-red-700 border border-red-200 px-3 py-2 md:px-4 rounded-full text-sm font-medium;
+  }
+
+  .page-transition {
+    @apply transition-all duration-300 ease-in-out;
+  }
+
+  .hero-gradient {
+    background: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(var(--card)) 100%);
+  }
+
+  .float-animation {
+    animation: float 3s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+}
