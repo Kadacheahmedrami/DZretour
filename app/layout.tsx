@@ -38,7 +38,7 @@ export const metadata: Metadata = {
       "منصة تبادل بيانات روتور لتجار الجزائر. تحقق من أرقام العملاء وأبلغ عن روتور لحماية تجارتك وتقليل الخسائر.",
     images: [
       {
-        url: "/og-image.png",
+        url: "/image.png",
         width: 1200,
         height: 630,
         alt: "DzRetour - احمِ تجارتك من روتور",
@@ -49,9 +49,9 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "DzRetour — احمِ تجارتك من روتور في الجزائر",
     description: "منصة تبادل بيانات روتور لتجار الجزائر",
-    images: ["/og-image.png"],
+    images: ["/image.png"],
   },
-    generator: 'v0.app'
+    generator: 'hawiyat.org'
 }
 
 export default function RootLayout({
