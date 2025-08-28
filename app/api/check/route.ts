@@ -95,7 +95,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { phone } = await request.json()
+    // Add proper error handling for request body parsing
+    let body;
+    try {
+      body = await request.json()
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "Invalid JSON in request body",
+          code: "INVALID_JSON",
+        },
+        { status: 400 }
+      )
+    }
+
+    const { phone } = body
 
     if (!phone) {
       return NextResponse.json(
@@ -146,7 +160,7 @@ export async function POST(request: NextRequest) {
 
     const riskAnalysis = calculateRiskScore(reports.length, daysSinceFirst)
 
-    // Group reasons but don't show exact counts - FIXED LINE
+    // Group reasons but don't show exact counts
     const reasonTypes = Array.from(new Set(reports.map(r => r.reason)))
     const hasCustomReasons = reports.some(r => r.customReason)
 

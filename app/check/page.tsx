@@ -28,7 +28,7 @@ function PhoneInput({ value, onChange, onValidation }: PhoneInputProps) {
         try {
           const text = await navigator.clipboard.readText()
           // Show paste button if clipboard contains something that looks like a phone number
-          setShowPasteButton(!value && text && /[\d\s\+\-\(\)]{8,}/.test(text))
+          setShowPasteButton(!!(!value && text && /[\d\s\+\-\(\)]{8,}/.test(text)))
         } catch (err) {
           setShowPasteButton(false)
         }
